@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted, nextTick } from 'vue';
 import { useTasks } from 'src/composables/useTasks';
 import type { Task } from 'src/services/taskApi';
 import TaskHeader from './ui/TaskHeader.vue';
@@ -16,6 +16,7 @@ const {
   pagination,
   totalPages,
   filterCompleted,
+  searchQuery,
   fetchTasks,
   addTask,
   editTask,
@@ -23,6 +24,7 @@ const {
   toggleTask,
   setPage,
   search,
+  searchImmediate,
   filterByCompleted,
 } = useTasks();
 
@@ -30,9 +32,26 @@ const editingTask = ref<Task | null>(null);
 const showAddDialog = ref(false);
 const showEditDialog = ref(false);
 const searchInput = ref('');
+const isUpdatingFromStore = ref(false);
 
 onMounted(() => {
   void fetchTasks();
+  searchInput.value = searchQuery.value;
+});
+
+watch(searchInput, (newValue) => {
+  if (!isUpdatingFromStore.value) {
+    search(newValue);
+  }
+});
+
+watch(searchQuery, async (newValue) => {
+  if (searchInput.value !== newValue) {
+    isUpdatingFromStore.value = true;
+    searchInput.value = newValue;
+    await nextTick();
+    isUpdatingFromStore.value = false;
+  }
 });
 
 const handleAddTask = async (taskData: { title: string; description?: string }) => {
@@ -58,7 +77,7 @@ const handleDeleteTask = async (id: number) => {
 };
 
 const handleSearch = () => {
-  search(searchInput.value);
+  searchImmediate(searchInput.value);
 };
 
 const handleFilterChange = (completed?: boolean) => {

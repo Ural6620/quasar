@@ -2,7 +2,7 @@ import { defineConfig } from '#q-app/wrappers';
 
 export default defineConfig((/* ctx */) => {
   return {
-    boot: [],
+    boot: ['pinia'],
 
     css: ['app.scss'],
 
@@ -27,7 +27,9 @@ export default defineConfig((/* ctx */) => {
         [
           'vite-plugin-checker',
           {
-            vueTsc: true,
+            vueTsc: {
+              tsconfigPath: 'tsconfig.json',
+            },
             eslint: {
               lintCommand: 'eslint -c ./eslint.config.js "./src*/**/*.{ts,js,mjs,cjs,vue}"',
               useFlatConfig: true,

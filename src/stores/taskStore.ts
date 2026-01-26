@@ -1,0 +1,291 @@
+import { defineStore } from 'pinia';
+import {
+  getTasks,
+  createTask,
+  updateTask,
+  deleteTask,
+  type Task,
+  type TaskQueryParams,
+} from 'src/services/taskApi';
+
+const STATE_STORAGE_KEY = 'todopy_tasks_state';
+
+interface TaskState {
+  tasks: Task[];
+  allTasks: Task[];
+  loading: boolean;
+  error: string | null;
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+  };
+  searchQuery: string;
+  filterCompleted: boolean | undefined;
+  togglingTasks: Set<number>;
+}
+
+interface PersistedState {
+  pagination: {
+    page: number;
+    limit: number;
+  };
+  searchQuery: string;
+  filterCompleted: boolean | undefined;
+}
+
+function getStateFromStorage(): PersistedState | null {
+  try {
+    const stored = localStorage.getItem(STATE_STORAGE_KEY);
+    if (!stored) return null;
+    return JSON.parse(stored) as PersistedState;
+  } catch {
+    return null;
+  }
+}
+
+function saveStateToStorage(state: PersistedState): void {
+  try {
+    localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.error('Failed to save state to localStorage:', error);
+  }
+}
+
+export const useTaskStore = defineStore('tasks', {
+  state: (): TaskState => {
+    const restoredState = getStateFromStorage();
+    
+    return {
+      tasks: [],
+      allTasks: [], 
+      loading: false,
+      error: null,
+      pagination: {
+        page: restoredState?.pagination.page ?? 1,
+        limit: restoredState?.pagination.limit ?? 10,
+        total: 0,
+      },
+      searchQuery: restoredState?.searchQuery ?? '',
+      filterCompleted: restoredState?.filterCompleted ?? undefined,
+      togglingTasks: new Set<number>(),
+    };
+  },
+
+  getters: {
+    totalPages: (state) => {
+      if (state.pagination.total === 0) return 1;
+      return Math.ceil(state.pagination.total / state.pagination.limit);
+    },
+  },
+
+  actions: {
+    async fetchTasks(params?: TaskQueryParams) {
+      this.loading = true;
+      this.error = null;
+      try {
+        if (this.searchQuery) {
+          const queryParams: TaskQueryParams = {
+            page: 1,
+            limit: 1000,
+          };
+
+          if (this.filterCompleted !== undefined) {
+            queryParams.completed = this.filterCompleted;
+          }
+
+          if (this.allTasks.length === 0) {
+            const response = await getTasks(queryParams);
+            this.allTasks = Array.isArray(response.items) ? response.items : [];
+          }
+
+          let filtered = [...this.allTasks];
+          
+          if (this.searchQuery) {
+            const query = this.searchQuery.toLowerCase();
+            filtered = filtered.filter(
+              (task) =>
+                task.title.toLowerCase().includes(query) ||
+                task.description?.toLowerCase().includes(query)
+            );
+          }
+
+          this.pagination.total = filtered.length;
+          const start = (this.pagination.page - 1) * this.pagination.limit;
+          const end = start + this.pagination.limit;
+          this.tasks = filtered.slice(start, end);
+        } else {
+          const queryParams: TaskQueryParams = {
+            page: params?.page || this.pagination.page,
+            limit: params?.limit || this.pagination.limit,
+          };
+
+          if (this.filterCompleted !== undefined) {
+            queryParams.completed = this.filterCompleted;
+          }
+
+          const response = await getTasks(queryParams);
+          this.tasks = Array.isArray(response.items) ? response.items : [];
+          this.pagination.total = response.meta?.total_items ?? 0;
+          if (params?.page) {
+            this.pagination.page = params.page;
+          } else {
+            this.pagination.page = response.meta?.current_page ?? this.pagination.page;
+          }
+          this.pagination.limit = response.meta?.per_page ?? this.pagination.limit;
+          
+          this.allTasks = [];
+        }
+      } catch (apiError: unknown) {
+        console.warn('API failed:', apiError);
+        this.error = apiError instanceof Error ? apiError.message : 'Failed to fetch tasks';
+        this.tasks = [];
+        this.allTasks = [];
+        this.pagination.total = 0;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async addTask(taskData: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) {
+      this.loading = true;
+      this.error = null;
+      try {
+        const newTask = await createTask(taskData);
+        if (this.pagination.page === 1) {
+          await this.fetchTasks();
+        } else {
+          this.tasks.unshift(newTask);
+          if (this.tasks.length > this.pagination.limit) {
+            this.tasks = this.tasks.slice(0, this.pagination.limit);
+          }
+        }
+        return newTask;
+      } catch (apiError: unknown) {
+        console.warn('API failed:', apiError);
+        this.error = apiError instanceof Error ? apiError.message : 'Failed to add task';
+        throw apiError;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async editTask(id: number, updates: Partial<Task>) {
+      this.loading = true;
+      this.error = null;
+      try {
+        const updatedTask = await updateTask(id, updates);
+        const index = this.tasks.findIndex((t) => t.id === id);
+        if (index !== -1) {
+          this.tasks[index] = updatedTask;
+        }
+        return updatedTask;
+      } catch (apiError: unknown) {
+        console.warn('API failed:', apiError);
+        this.error = apiError instanceof Error ? apiError.message : 'Failed to edit task';
+        throw apiError;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async removeTask(id: number) {
+      this.loading = true;
+      this.error = null;
+      try {
+        await deleteTask(id);
+        this.tasks = this.tasks.filter((t) => t.id !== id);
+        this.pagination.total = Math.max(0, this.pagination.total - 1);
+        if (this.tasks.length === 0 && this.pagination.page > 1) {
+          this.pagination.page -= 1;
+          await this.fetchTasks();
+        }
+      } catch (apiError: unknown) {
+        console.warn('API failed:', apiError);
+        this.error = apiError instanceof Error ? apiError.message : 'Failed to remove task';
+        this.tasks = this.tasks.filter((t) => t.id !== id);
+        this.pagination.total = Math.max(0, this.pagination.total - 1);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async toggleTask(id: number) {
+      if (this.togglingTasks.has(id)) {
+        return;
+      }
+
+      const index = this.tasks.findIndex((t) => t.id === id);
+      if (index === -1) return;
+
+      const task = this.tasks[index];
+      if (!task) return;
+
+      this.togglingTasks.add(id);
+
+      const previousCompleted = task.completed;
+      const newCompleted = !previousCompleted;
+
+      this.tasks[index] = {
+        ...task,
+        completed: newCompleted,
+        updatedAt: new Date().toISOString(),
+      };
+
+      try {
+        const updatedTask = await updateTask(id, { completed: newCompleted });
+        const updatedIndex = this.tasks.findIndex((t) => t.id === id);
+        if (updatedIndex !== -1) {
+          this.tasks[updatedIndex] = updatedTask;
+        }
+      } catch (error: unknown) {
+        console.warn('API update failed, keeping local change:', error);
+      } finally {
+        this.togglingTasks.delete(id);
+      }
+    },
+
+    saveState() {
+      saveStateToStorage({
+        pagination: {
+          page: this.pagination.page,
+          limit: this.pagination.limit,
+        },
+        searchQuery: this.searchQuery,
+        filterCompleted: this.filterCompleted,
+      });
+    },
+
+    setPage(page: number) {
+      this.pagination.page = page;
+      this.saveState();
+      void this.fetchTasks({ page });
+    },
+
+    setLimit(limit: number) {
+      this.pagination.limit = limit;
+      this.pagination.page = 1;
+      this.saveState();
+      void this.fetchTasks({ limit });
+    },
+
+    search(query: string) {
+      this.searchQuery = query;
+      this.pagination.page = 1;
+      
+      if (!query) {
+        this.allTasks = [];
+      }
+      
+      this.saveState();
+      void this.fetchTasks();
+    },
+
+    filterByCompleted(completed?: boolean) {
+      this.filterCompleted = completed;
+      this.pagination.page = 1;
+      this.saveState();
+      void this.fetchTasks();
+    },
+  },
+});
