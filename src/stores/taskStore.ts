@@ -9,6 +9,7 @@ import {
 } from 'src/services/taskApi';
 
 const STATE_STORAGE_KEY = 'todopy_tasks_state';
+const TASKS_STORAGE_KEY = 'todopy_tasks';
 
 interface TaskState {
   tasks: Task[];
@@ -52,13 +53,51 @@ function saveStateToStorage(state: PersistedState): void {
   }
 }
 
+function getTasksFromStorage(): Task[] {
+  try {
+    const stored = localStorage.getItem(TASKS_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTasksToStorage(tasks: Task[]): void {
+  try {
+    localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
+  } catch (error) {
+    console.error('Failed to save tasks to localStorage:', error);
+  }
+}
+
+function mergeTasksWithStorage(newTasks: Task[]): Task[] {
+  const storedTasks = getTasksFromStorage();
+  const taskMap = new Map<number, Task>();
+  
+  storedTasks.forEach(task => {
+    if (task.id !== undefined) {
+      taskMap.set(task.id, task);
+    }
+  });
+  
+  newTasks.forEach(task => {
+    if (task.id !== undefined) {
+      taskMap.set(task.id, task);
+    }
+  });
+  
+  return Array.from(taskMap.values());
+}
+
 export const useTaskStore = defineStore('tasks', {
   state: (): TaskState => {
     const restoredState = getStateFromStorage();
     
     return {
       tasks: [],
-      allTasks: [], 
+      allTasks: [],
       loading: false,
       error: null,
       pagination: {
@@ -134,6 +173,11 @@ export const useTaskStore = defineStore('tasks', {
           }
           this.pagination.limit = response.meta?.per_page ?? this.pagination.limit;
           
+          if (Array.isArray(response.items) && response.items.length > 0) {
+            const mergedTasks = mergeTasksWithStorage(response.items);
+            saveTasksToStorage(mergedTasks);
+          }
+          
           this.allTasks = [];
         }
       } catch (apiError: unknown) {
@@ -152,6 +196,11 @@ export const useTaskStore = defineStore('tasks', {
       this.error = null;
       try {
         const newTask = await createTask(taskData);
+        
+        const allTasks = getTasksFromStorage();
+        allTasks.unshift(newTask);
+        saveTasksToStorage(allTasks);
+        
         if (this.pagination.page === 1) {
           await this.fetchTasks();
         } else {
@@ -175,6 +224,14 @@ export const useTaskStore = defineStore('tasks', {
       this.error = null;
       try {
         const updatedTask = await updateTask(id, updates);
+        
+        const allTasks = getTasksFromStorage();
+        const storageIndex = allTasks.findIndex((t) => t.id === id);
+        if (storageIndex !== -1) {
+          allTasks[storageIndex] = updatedTask;
+          saveTasksToStorage(allTasks);
+        }
+        
         const index = this.tasks.findIndex((t) => t.id === id);
         if (index !== -1) {
           this.tasks[index] = updatedTask;
@@ -194,6 +251,11 @@ export const useTaskStore = defineStore('tasks', {
       this.error = null;
       try {
         await deleteTask(id);
+        
+        const allTasks = getTasksFromStorage();
+        const filtered = allTasks.filter((t) => t.id !== id);
+        saveTasksToStorage(filtered);
+        
         this.tasks = this.tasks.filter((t) => t.id !== id);
         this.pagination.total = Math.max(0, this.pagination.total - 1);
         if (this.tasks.length === 0 && this.pagination.page > 1) {
@@ -203,6 +265,11 @@ export const useTaskStore = defineStore('tasks', {
       } catch (apiError: unknown) {
         console.warn('API failed:', apiError);
         this.error = apiError instanceof Error ? apiError.message : 'Failed to remove task';
+        
+        const allTasks = getTasksFromStorage();
+        const filtered = allTasks.filter((t) => t.id !== id);
+        saveTasksToStorage(filtered);
+        
         this.tasks = this.tasks.filter((t) => t.id !== id);
         this.pagination.total = Math.max(0, this.pagination.total - 1);
       } finally {
@@ -234,6 +301,14 @@ export const useTaskStore = defineStore('tasks', {
 
       try {
         const updatedTask = await updateTask(id, { completed: newCompleted });
+        
+        const allTasks = getTasksFromStorage();
+        const storageIndex = allTasks.findIndex((t) => t.id === id);
+        if (storageIndex !== -1) {
+          allTasks[storageIndex] = updatedTask;
+          saveTasksToStorage(allTasks);
+        }
+        
         const updatedIndex = this.tasks.findIndex((t) => t.id === id);
         if (updatedIndex !== -1) {
           this.tasks[updatedIndex] = updatedTask;
