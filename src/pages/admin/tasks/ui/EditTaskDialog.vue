@@ -15,35 +15,47 @@ const emit = defineEmits<{
 const title = ref('');
 const description = ref('');
 const isSubmitting = ref(false);
+const titleError = ref('');
 
 watch(() => props.task, (newTask) => {
   if (newTask) {
     title.value = newTask.title;
     description.value = newTask.description || '';
+    titleError.value = '';
   }
 }, { immediate: true });
 
 watch(() => props.modelValue, (newVal) => {
   if (!newVal) {
-    title.value = '';
-    description.value = '';
     isSubmitting.value = false;
-  } else {
+    titleError.value = '';
+  } else if (props.task) {
+    title.value = props.task.title;
+    description.value = props.task.description || '';
+    titleError.value = '';
     isSubmitting.value = false;
   }
 });
 
 const handleSubmit = () => {
-  if (!props.task || !title.value.trim() || isSubmitting.value) return;
+  if (!props.task || isSubmitting.value) return;
 
+  const trimmedTitle = title.value.trim();
+  if (!trimmedTitle) {
+    titleError.value = 'Title is required';
+    return;
+  }
+
+  titleError.value = '';
   isSubmitting.value = true;
 
   const updates: { title: string; description?: string | null } = {
-    title: title.value.trim(),
+    title: trimmedTitle,
   };
   
-  if (description.value.trim()) {
-    updates.description = description.value.trim();
+  const trimmedDescription = description.value.trim();
+  if (trimmedDescription) {
+    updates.description = trimmedDescription;
   } else {
     updates.description = null;
   }
@@ -65,7 +77,10 @@ const handleSubmit = () => {
           label="Title"
           outlined
           autofocus
+          :error="!!titleError"
+          :error-message="titleError"
           @keyup.enter="handleSubmit"
+          @update:model-value="titleError = ''"
         />
         <q-input
           v-model="description"

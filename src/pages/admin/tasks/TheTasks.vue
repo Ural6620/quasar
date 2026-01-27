@@ -73,6 +73,8 @@ const handleUpdateTask = async (id: number, updates: { title: string; descriptio
     editingTask.value = null;
   } catch (error) {
     console.error('Failed to update task:', error);
+    showEditDialog.value = false;
+    editingTask.value = null;
   }
 };
 
