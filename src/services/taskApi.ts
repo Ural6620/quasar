@@ -3,7 +3,7 @@ import { apiClient } from './apiClient';
 export interface Task {
   id?: number;
   title: string;
-  description?: string;
+  description?: string | null;
   completed: boolean;
   dueDate?: string;
   createdAt?: string;
@@ -25,7 +25,7 @@ export interface TaskQueryParams {
   page?: number;
   limit?: number;
   completed?: boolean;
-  search?: string;
+  title?: string;
 }
 
 export const getTasks = async (params?: TaskQueryParams): Promise<TaskResponse> => {

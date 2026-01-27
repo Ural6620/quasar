@@ -13,7 +13,6 @@ const TASKS_STORAGE_KEY = 'todopy_tasks';
 
 interface TaskState {
   tasks: Task[];
-  allTasks: Task[];
   loading: boolean;
   error: string | null;
   pagination: {
@@ -97,12 +96,11 @@ export const useTaskStore = defineStore('tasks', {
     
     return {
       tasks: [],
-      allTasks: [],
       loading: false,
       error: null,
       pagination: {
-        page: restoredState?.pagination.page ?? 1,
-        limit: restoredState?.pagination.limit ?? 10,
+        page: restoredState?.pagination?.page ?? 1,
+        limit: restoredState?.pagination?.limit ?? 10,
         total: 0,
       },
       searchQuery: restoredState?.searchQuery ?? '',
@@ -123,68 +121,37 @@ export const useTaskStore = defineStore('tasks', {
       this.loading = true;
       this.error = null;
       try {
+        const queryParams: TaskQueryParams = {
+          page: params?.page || this.pagination.page,
+          limit: params?.limit || this.pagination.limit,
+        };
+
+        if (this.filterCompleted !== undefined) {
+          queryParams.completed = this.filterCompleted;
+        }
+
         if (this.searchQuery) {
-          const queryParams: TaskQueryParams = {
-            page: 1,
-            limit: 1000,
-          };
+          queryParams.title = this.searchQuery;
+        }
 
-          if (this.filterCompleted !== undefined) {
-            queryParams.completed = this.filterCompleted;
-          }
-
-          if (this.allTasks.length === 0) {
-            const response = await getTasks(queryParams);
-            this.allTasks = Array.isArray(response.items) ? response.items : [];
-          }
-
-          let filtered = [...this.allTasks];
-          
-          if (this.searchQuery) {
-            const query = this.searchQuery.toLowerCase();
-            filtered = filtered.filter(
-              (task) =>
-                task.title.toLowerCase().includes(query) ||
-                task.description?.toLowerCase().includes(query)
-            );
-          }
-
-          this.pagination.total = filtered.length;
-          const start = (this.pagination.page - 1) * this.pagination.limit;
-          const end = start + this.pagination.limit;
-          this.tasks = filtered.slice(start, end);
+        const response = await getTasks(queryParams);
+        this.tasks = Array.isArray(response.items) ? response.items : [];
+        this.pagination.total = response.meta?.total_items ?? 0;
+        if (params?.page) {
+          this.pagination.page = params.page;
         } else {
-          const queryParams: TaskQueryParams = {
-            page: params?.page || this.pagination.page,
-            limit: params?.limit || this.pagination.limit,
-          };
-
-          if (this.filterCompleted !== undefined) {
-            queryParams.completed = this.filterCompleted;
-          }
-
-          const response = await getTasks(queryParams);
-          this.tasks = Array.isArray(response.items) ? response.items : [];
-          this.pagination.total = response.meta?.total_items ?? 0;
-          if (params?.page) {
-            this.pagination.page = params.page;
-          } else {
-            this.pagination.page = response.meta?.current_page ?? this.pagination.page;
-          }
-          this.pagination.limit = response.meta?.per_page ?? this.pagination.limit;
-          
-          if (Array.isArray(response.items) && response.items.length > 0) {
-            const mergedTasks = mergeTasksWithStorage(response.items);
-            saveTasksToStorage(mergedTasks);
-          }
-          
-          this.allTasks = [];
+          this.pagination.page = response.meta?.current_page ?? this.pagination.page;
+        }
+        this.pagination.limit = response.meta?.per_page ?? this.pagination.limit;
+        
+        if (Array.isArray(response.items) && response.items.length > 0) {
+          const mergedTasks = mergeTasksWithStorage(response.items);
+          saveTasksToStorage(mergedTasks);
         }
       } catch (apiError: unknown) {
         console.warn('API failed:', apiError);
         this.error = apiError instanceof Error ? apiError.message : 'Failed to fetch tasks';
         this.tasks = [];
-        this.allTasks = [];
         this.pagination.total = 0;
       } finally {
         this.loading = false;
@@ -219,7 +186,7 @@ export const useTaskStore = defineStore('tasks', {
       }
     },
 
-    async editTask(id: number, updates: Partial<Task>) {
+    async editTask(id: number, updates: Partial<Task> & { description?: string | null }) {
       this.loading = true;
       this.error = null;
       try {
@@ -347,11 +314,6 @@ export const useTaskStore = defineStore('tasks', {
     search(query: string) {
       this.searchQuery = query;
       this.pagination.page = 1;
-      
-      if (!query) {
-        this.allTasks = [];
-      }
-      
       this.saveState();
       void this.fetchTasks();
     },

@@ -66,10 +66,14 @@ const handleEditTask = (task: Task) => {
   showEditDialog.value = true;
 };
 
-const handleUpdateTask = async (id: number, updates: { title: string; description?: string }) => {
-  await editTask(id, updates);
-  showEditDialog.value = false;
-  editingTask.value = null;
+const handleUpdateTask = async (id: number, updates: { title: string; description?: string | null }) => {
+  try {
+    await editTask(id, updates);
+    showEditDialog.value = false;
+    editingTask.value = null;
+  } catch (error) {
+    console.error('Failed to update task:', error);
+  }
 };
 
 const handleDeleteTask = async (id: number) => {
